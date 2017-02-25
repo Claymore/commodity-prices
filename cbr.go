@@ -4,10 +4,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"golang.org/x/net/html/charset"
 )
 
@@ -17,37 +17,42 @@ type CBRValCurs struct {
 }
 
 type CBRRecord struct {
-	Nominal int    `xml:"Nominal"`
+	Nominal int64  `xml:"Nominal"`
 	Value   string `xml:"Value"`
 	Date    string `xml:"Date,attr"`
 	ID      string `xml:"Id,attr"`
 }
 
-func toCommodity(id string) string {
-	// http://www.cbr.ru/scripts/XML_valFull.asp
-	switch id {
-	case "R01235":
-		return "USD"
-	case "R01090":
-		return "BYN"
-	case "R01135":
-		return "HUF"
-	default:
-		return "Unknown"
-	}
+type CBRValuta struct {
+	XMLName xml.Name        `xml:"Valuta"`
+	Items   []CBRValutaItem `xml:"Item"`
 }
 
-func toID(commodity string) string {
-	switch commodity {
-	case "USD":
-		return "R01235"
-	case "BYN":
-		return "R01090"
-	case "HUF":
-		return "R01135"
-	default:
-		return "Unknown"
+type CBRValutaItem struct {
+	ISOCharCode string `xml:"ISO_Char_Code"`
+	ID          string `xml:"ID,attr"`
+}
+
+func (cbr *CBR) toID(commodity string) (id string, err error) {
+	url := "http://www.cbr.ru/scripts/XML_valFull.asp"
+	response, err := cbr.client.Get(url)
+	if err != nil {
+		return id, err
 	}
+	defer response.Body.Close()
+	decoder := xml.NewDecoder(response.Body)
+	decoder.CharsetReader = charset.NewReaderLabel
+	var valuta CBRValuta
+	err = decoder.Decode(&valuta)
+	if err != nil {
+		return id, err
+	}
+	for _, i := range valuta.Items {
+		if i.ISOCharCode == commodity {
+			return i.ID, nil
+		}
+	}
+	return id, fmt.Errorf("unknown commodity: %s", commodity)
 }
 
 type CBR struct {
@@ -55,7 +60,10 @@ type CBR struct {
 }
 
 func (cbr *CBR) Prices(commodity, from, till string) (prices []Price, err error) {
-	cbrID := toID(commodity)
+	cbrID, err := cbr.toID(commodity)
+	if err != nil {
+		return prices, err
+	}
 	fromTime, err := time.Parse("2006-01-02", from)
 	if err != nil {
 		return prices, err
@@ -80,7 +88,7 @@ func (cbr *CBR) Prices(commodity, from, till string) (prices []Price, err error)
 		return prices, err
 	}
 	for _, r := range cbrRecords.Records {
-		price, err := r.ToPrice()
+		price, err := r.ToPrice(commodity)
 		if err != nil {
 			return prices, err
 		}
@@ -89,16 +97,16 @@ func (cbr *CBR) Prices(commodity, from, till string) (prices []Price, err error)
 	return prices, nil
 }
 
-func (r *CBRRecord) ToPrice() (price Price, err error) {
-	price.Commodity = toCommodity(r.ID)
+func (r *CBRRecord) ToPrice(commodity string) (price Price, err error) {
+	price.Commodity = commodity
 	price.Date, err = time.Parse("02.01.2006", r.Date)
 	if err != nil {
 		return price, err
 	}
-	price.Price, err = strconv.ParseFloat(strings.Replace(r.Value, ",", ".", -1), 64)
+	price.Price, err = decimal.NewFromString(strings.Replace(r.Value, ",", ".", -1))
 	if err != nil {
 		return price, err
 	}
-	price.Price = price.Price / float64(r.Nominal)
+	price.Price = price.Price.Div(decimal.New(r.Nominal, 0))
 	return price, err
 }
