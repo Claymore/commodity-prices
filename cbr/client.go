@@ -1,4 +1,4 @@
-package main
+package cbr
 
 import (
 	"encoding/xml"
@@ -9,31 +9,33 @@ import (
 
 	"github.com/shopspring/decimal"
 	"golang.org/x/net/html/charset"
+
+	"github.com/Claymore/commodity-prices/price"
 )
 
-type CBRValCurs struct {
-	XMLName xml.Name    `xml:"ValCurs"`
-	Records []CBRRecord `xml:"Record"`
+type exchangeRate struct {
+	XMLName xml.Name `xml:"ValCurs"`
+	Records []record `xml:"Record"`
 }
 
-type CBRRecord struct {
+type record struct {
 	Nominal int64  `xml:"Nominal"`
 	Value   string `xml:"Value"`
 	Date    string `xml:"Date,attr"`
 	ID      string `xml:"Id,attr"`
 }
 
-type CBRValuta struct {
-	XMLName xml.Name        `xml:"Valuta"`
-	Items   []CBRValutaItem `xml:"Item"`
+type currency struct {
+	XMLName xml.Name `xml:"Valuta"`
+	Items   []item   `xml:"Item"`
 }
 
-type CBRValutaItem struct {
+type item struct {
 	ISOCharCode string `xml:"ISO_Char_Code"`
 	ID          string `xml:"ID,attr"`
 }
 
-func (cbr *CBR) toID(commodity string) (id string, err error) {
+func (cbr *Client) id(commodity string) (id string, err error) {
 	url := "http://www.cbr.ru/scripts/XML_valFull.asp"
 	response, err := cbr.client.Get(url)
 	if err != nil {
@@ -42,12 +44,12 @@ func (cbr *CBR) toID(commodity string) (id string, err error) {
 	defer response.Body.Close()
 	decoder := xml.NewDecoder(response.Body)
 	decoder.CharsetReader = charset.NewReaderLabel
-	var valuta CBRValuta
-	err = decoder.Decode(&valuta)
+	var currency currency
+	err = decoder.Decode(&currency)
 	if err != nil {
 		return id, err
 	}
-	for _, i := range valuta.Items {
+	for _, i := range currency.Items {
 		if i.ISOCharCode == commodity {
 			return i.ID, nil
 		}
@@ -55,12 +57,16 @@ func (cbr *CBR) toID(commodity string) (id string, err error) {
 	return id, fmt.Errorf("unknown commodity: %s", commodity)
 }
 
-type CBR struct {
+type Client struct {
 	client http.Client
 }
 
-func (cbr *CBR) Prices(commodity, from, till string) (prices []Price, err error) {
-	cbrID, err := cbr.toID(commodity)
+func NewClient() *Client {
+	return &Client{}
+}
+
+func (cbr Client) Prices(commodity, from, till string) (prices []price.Price, err error) {
+	cbrID, err := cbr.id(commodity)
 	if err != nil {
 		return prices, err
 	}
@@ -82,12 +88,12 @@ func (cbr *CBR) Prices(commodity, from, till string) (prices []Price, err error)
 	defer response.Body.Close()
 	decoder := xml.NewDecoder(response.Body)
 	decoder.CharsetReader = charset.NewReaderLabel
-	var cbrRecords CBRValCurs
-	err = decoder.Decode(&cbrRecords)
+	var rate exchangeRate
+	err = decoder.Decode(&rate)
 	if err != nil {
 		return prices, err
 	}
-	for _, r := range cbrRecords.Records {
+	for _, r := range rate.Records {
 		price, err := r.ToPrice(commodity)
 		if err != nil {
 			return prices, err
@@ -97,7 +103,7 @@ func (cbr *CBR) Prices(commodity, from, till string) (prices []Price, err error)
 	return prices, nil
 }
 
-func (r *CBRRecord) ToPrice(commodity string) (price Price, err error) {
+func (r *record) ToPrice(commodity string) (price price.Price, err error) {
 	price.Commodity = commodity
 	price.Date, err = time.Parse("02.01.2006", r.Date)
 	if err != nil {

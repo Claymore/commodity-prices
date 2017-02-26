@@ -6,40 +6,27 @@ import (
 	"os"
 	"time"
 
-	"github.com/shopspring/decimal"
+	"github.com/Claymore/commodity-prices/cbr"
+	"github.com/Claymore/commodity-prices/moex"
+	"github.com/Claymore/commodity-prices/price"
 )
 
-type Price struct {
-	Commodity string
-	Date      time.Time
-	Price     decimal.Decimal
-}
+type formatFunc func(price.Price) string
 
-func (p Price) Format(format string) (str string, err error) {
-	switch format {
-	case "ledger":
-		return p.LedgerFormat(), nil
-	case "csv":
-		return p.CSVFormat(), nil
-	default:
-		return str, fmt.Errorf("unknown format: %s", format)
-	}
-}
-
-func (p Price) LedgerFormat() string {
+func ledgerFormat(p price.Price) string {
 	date := p.Date.Format("2006/01/02")
 	price := p.Price.String()
 	return fmt.Sprintf("P %s %s %s RUR", date, p.Commodity, price)
 }
 
-func (p Price) CSVFormat() string {
+func csvFormat(p price.Price) string {
 	date := p.Date.Format("02.01.2006")
 	price := p.Price.String()
 	return fmt.Sprintf("%s,%s,%s", p.Commodity, date, price)
 }
 
-func monthlyFilter(prices []Price) (filtered []Price) {
-	var lastTradingDay Price
+func monthlyFilter(prices []price.Price) (filtered []price.Price) {
+	var lastTradingDay price.Price
 	firstRecord := true
 	for _, p := range prices {
 		if firstRecord {
@@ -69,38 +56,47 @@ func main() {
 	var filter = flag.String("filter", "none", "filter dates: none|monthly")
 	flag.Parse()
 
+	var formatFunc formatFunc
+	switch *format {
+	case "ledger":
+		formatFunc = ledgerFormat
+	case "csv":
+		formatFunc = csvFormat
+	default:
+		fmt.Printf("error: unknown format: %s\n", *format)
+		os.Exit(-1)
+	}
+
 	var err error
-	var prices []Price
+	var prices []price.Price
+	var teller price.Teller
 	switch *source {
 	case "cbr":
-		cbr := CBR{}
-		prices, err = cbr.Prices(*commodity, *from, *till)
+		teller = cbr.NewClient()
 		break
 	case "moex shares":
-		moex := MOEX{Market: "shares"}
-		prices, err = moex.Prices(*commodity, *from, *till)
+		teller = moex.NewClient("shares")
 		break
 	case "moex index":
-		moex := MOEX{Market: "index"}
-		prices, err = moex.Prices(*commodity, *from, *till)
+		teller = moex.NewClient("index")
 		break
 	default:
 		err = fmt.Errorf("unknown source: %s", *source)
 		break
 	}
+
+	prices, err = teller.Prices(*commodity, *from, *till)
 	if err != nil {
 		fmt.Printf("error: %s\n", err)
 		os.Exit(-1)
 	}
+
 	if *filter == "monthly" {
 		prices = monthlyFilter(prices)
 	}
+
 	for _, p := range prices {
-		output, err := p.Format(*format)
-		if err != nil {
-			fmt.Printf("error: %s\n", err)
-			os.Exit(-1)
-		}
+		output := formatFunc(p)
 		fmt.Printf("%s\n", output)
 	}
 }
