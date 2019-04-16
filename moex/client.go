@@ -13,11 +13,12 @@ import (
 
 type Client struct {
 	market string
+	board  string
 	client http.Client
 }
 
-func NewClient(market string) *Client {
-	return &Client{market: market}
+func NewClient(market, board string) *Client {
+	return &Client{market: market, board: board}
 }
 
 type document struct {
@@ -38,6 +39,7 @@ type row struct {
 	Index           int    `xml:"INDEX,attr"`
 	PageSize        int    `xml:"PAGESIZE,attr"`
 	Total           int    `xml:"TOTAL,attr"`
+	BoardID         string `xml:"BOARDID,attr"`
 }
 
 func (moex *Client) page(commodity, from, till string, index int) (prices []price.Price, eof bool, err error) {
@@ -57,6 +59,9 @@ func (moex *Client) page(commodity, from, till string, index int) (prices []pric
 		switch d.ID {
 		case "history":
 			for _, r := range d.Rows {
+				if r.BoardID != moex.board {
+					continue
+				}
 				price, err := r.ToPrice()
 				if err != nil {
 					return prices, eof, err

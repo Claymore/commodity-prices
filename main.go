@@ -53,6 +53,7 @@ func main() {
 	var till = flag.String("till", today, "till")
 	var format = flag.String("format", "csv", "format output: ledger|csv")
 	var source = flag.String("source", "cbr", "source: cbr|moex shares|moex index")
+	var board = flag.String("board", "TQTF", "moex board")
 	var filter = flag.String("filter", "none", "filter dates: none|monthly")
 	flag.Parse()
 
@@ -75,10 +76,10 @@ func main() {
 		teller = cbr.NewClient()
 		break
 	case "moex shares":
-		teller = moex.NewClient("shares")
+		teller = moex.NewClient("shares", *board)
 		break
 	case "moex index":
-		teller = moex.NewClient("index")
+		teller = moex.NewClient("index", *board)
 		break
 	default:
 		err = fmt.Errorf("unknown source: %s", *source)
