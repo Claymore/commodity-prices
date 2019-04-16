@@ -32,7 +32,7 @@ type currency struct {
 
 type item struct {
 	ISOCharCode string `xml:"ISO_Char_Code"`
-	ID          string `xml:"ID,attr"`
+	ParentCode  string `xml:"ParentCode"`
 }
 
 func (cbr *Client) id(commodity string) (id string, err error) {
@@ -51,7 +51,7 @@ func (cbr *Client) id(commodity string) (id string, err error) {
 	}
 	for _, i := range currency.Items {
 		if i.ISOCharCode == commodity {
-			return i.ID, nil
+			return i.ParentCode, nil
 		}
 	}
 	return id, fmt.Errorf("unknown commodity: %s", commodity)
